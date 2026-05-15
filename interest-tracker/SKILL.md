@@ -1,8 +1,9 @@
 ---
 name: interest-tracker
 description: 📬 自动兴趣追踪 — 每天从综合新闻源匹配你关心的领域/话题并推送。用户只说"关注XXX"，我配好关键词和优先级，每天09:00自动跑。
-version: 1.0.0
+version: 1.2.0
 tags: [interest, tracking, news, automation, 兴趣追踪, 新闻推送]
+related_skills: [news-fetcher]
 ---
 
 # 📬 兴趣追踪器
@@ -41,6 +42,7 @@ tags: [interest, tracking, news, automation, 兴趣追踪, 新闻推送]
 | 包装脚本 | `~/.hermes/scripts/interest_tracker.sh` | cron 包装（`python3 ~/.hermes/scripts/interest_tracker.py`） |
 | 配置文件 | `~/.hermes/interest-tracker/interests.json` | 兴趣方向/关键词/优先级 |
 | 每日日志 | `~/.hermes/interest-tracker/interests_YYYY-MM-DD.log` | 推送历史 |
+| 新闻源参考 | `references/news-sources.md` | 已验证可用的新闻源清单、端点、格式 |
 
 ### 配置文件格式
 
@@ -71,7 +73,14 @@ tags: [interest, tracking, news, automation, 兴趣追踪, 新闻推送]
 
 ## 数据源
 
-使用 `news.topurl.cn` API（同每日新闻简报），获取当日全部新闻条目后按关键词匹配。
+依赖 [news-fetcher](skill:news-fetcher) 模块，从 **4 个免费新闻源**同时抓取并去重：
+
+| 源 | 条数 | 语言 | 类型 |
+|:---|:----:|:----:|:-----|
+| topurl.cn | ~20 | 中文 | 综合（含自媒体） |
+| 搜狐新闻 channel 8 | ~20 | 中文 | 正规媒体（新华社/澎湃等） |
+| Google News RSS | ~26 | 中文 | 多源聚合头条 |
+| Actually Relevant RSS | ~50 | 英语 | AI 精选全球新闻 |
 
 匹配逻辑：`any(kw.lower() in title.lower() for kw in keywords)`
 
@@ -101,6 +110,15 @@ tags: [interest, tracking, news, automation, 兴趣追踪, 新闻推送]
 ---
 
 ## 更新记录
+
+### v1.2.0 (2026-05-16)
+- 集成 4 源新闻（topurl/搜狐/Google/Relevant），由 `news-fetcher` 模块统一抓取
+- 匹配源增加到 ~116条/次，中文66+英文50
+- 底部新增来源统计行
+
+### v1.1.0 (2026-05-16)
+- 新增 `references/news-sources.md` — 已测试的新闻源清单（搜狐/Google/Actually Relevant）
+- SKILL.md 数据源部分扩展为可配多源架构
 
 ### v1.0.0 (2026-05-16)
 - 从 `stock-trading-agent` 技能独立拆分

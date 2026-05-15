@@ -30,9 +30,25 @@ Hermes Agent 自定义技能集。
 | `09:00` 每天（含周末） | 获取当日新闻 → 关键词匹配 → 推送相关条目 |
 
 **匹配逻辑：** 标题包含任一关键词即命中，按热度排序取前 3 条。  
-**数据源：** news.topurl.cn API（同每日新闻简报）
+**数据源：** 依赖 [news-fetcher](news-fetcher/SKILL.md) 模块，4 源聚合（topurl/搜狐/Google/Relevant）
 
 [查看详情 →](interest-tracker/SKILL.md)
+
+### 📰 news-fetcher
+
+多源新闻抓取模块 — 从 4 个免费新闻源统一抓取并去重。可作 Python 模块导入，也支持命令行。
+
+| 源 | 条数 | 语言 | 类型 |
+|:---|:----:|:----:|:-----|
+| topurl.cn | ~20 | 中文 | 综合 |
+| 搜狐新闻 | ~20 | 中文 | 正规媒体 |
+| Google News RSS | ~26 | 中文 | 多源聚合 |
+| Actually Relevant RSS | ~50 | 英语 | AI 精选 |
+| **合计** | **~116** | | |
+
+**无需 API Key，纯标准库依赖。** 供 `interest-tracker` 和 `morning_briefing.py` 等消费者调用。
+
+[查看详情 →](news-fetcher/SKILL.md)
 
 ---
 
@@ -42,14 +58,16 @@ Hermes Agent 自定义技能集。
 # 将所有技能复制到 Hermes Agent skills 目录
 cp -r stock-trading-agent ~/.hermes/skills/software-development/
 cp -r interest-tracker ~/.hermes/skills/
+cp -r news-fetcher ~/.hermes/skills/
 
 # 复制脚本到 scripts 目录
 cp stock-trading-agent/scripts/*.py ~/.hermes/scripts/
 cp interest-tracker/scripts/*.py ~/.hermes/scripts/
+cp news-fetcher/scripts/*.py ~/.hermes/scripts/
 ```
 
 ## 关联
 
-- `interest-tracker` 是 `stock-trading-agent` 的关联技能（`related_skills`）
-- 两者共用每日新闻数据源（news.topurl.cn）
-- 定时任务时间错开：新闻简报 08:30 → 兴趣追踪 09:00 → 开盘分析 09:00(仅交易日)
+- `interest-tracker` 依赖 `news-fetcher` 获取新闻数据
+- `interest-tracker` 与 `stock-trading-agent` 共用开盘前分析时段（09:00）
+- 每日定时：新闻简报 08:30 → 兴趣追踪 09:00 → 开盘分析 09:00(仅交易日)
