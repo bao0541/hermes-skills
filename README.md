@@ -44,7 +44,9 @@ Hermes Agent 自定义技能集。
 | 搜狐新闻 | ~20 | 中文 | 正规媒体 |
 | Google News RSS | ~26 | 中文 | 多源聚合 |
 | Actually Relevant RSS | ~50 | 英语 | AI 精选 |
-| **合计** | **~116** | | |
+| 新浪财经 | ~20 | 中文 | 财经新闻 |
+| 36氪 | ~30 | 中文 | 科技/商业 |
+| **合计** | **~166** | | |
 
 **无需 API Key，纯标准库依赖。** 供 `interest-tracker` 和 `morning_briefing.py` 等消费者调用。
 

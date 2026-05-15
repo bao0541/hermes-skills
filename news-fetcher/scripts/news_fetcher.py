@@ -10,6 +10,8 @@
     python3 news_fetcher.py --source sohu      # 只抓搜狐
     python3 news_fetcher.py --source google    # 只抓 Google News
     python3 news_fetcher.py --source relevant  # 只抓 Actually Relevant
+    python3 news_fetcher.py --source sinafin   # 只抓新浪财经
+    python3 news_fetcher.py --source 36kr      # 只抓36氪
 
 返回格式（每个 item）:
     {"title": str, "url": str, "source": str, "score": int}
@@ -40,6 +42,16 @@ SOURCES = {
         "name": "Actually Relevant",
         "url": "https://actually-relevant-api.onrender.com/api/feed",
         "parser": "_parse_relevant_rss",
+    },
+    "sinafin": {
+        "name": "新浪财经",
+        "url": "https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2509&k=&num=20&page=1",
+        "parser": "_parse_sinafin",
+    },
+    "36kr": {
+        "name": "36氪",
+        "url": "https://36kr.com/feed",
+        "parser": "_parse_36kr_rss",
     },
 }
 
@@ -177,6 +189,52 @@ def _parse_relevant_rss(raw_text: str) -> list[dict]:
     return results
 
 
+def _parse_sinafin(raw) -> list[dict]:
+    """解析新浪财经滚动新闻 JSON"""
+    if not raw:
+        return []
+    items = raw.get("result", {}).get("data", [])
+    return [
+        {
+            "title": item.get("title", ""),
+            "url": item.get("url", ""),
+            "source": "新浪财经",
+            "score": 8,
+        }
+        for item in items
+        if item.get("title")
+    ]
+
+
+def _parse_36kr_rss(raw_text: str) -> list[dict]:
+    """解析 36氪 RSS"""
+    if not raw_text:
+        return []
+    try:
+        root = ET.fromstring(raw_text.encode("utf-8"))
+    except Exception:
+        return []
+    items = root.findall(".//item")
+    results = []
+    seen = set()
+    for item in items:
+        title_el = item.find("title")
+        link_el = item.find("link")
+        pub_el = item.find("pubDate")
+        title = title_el.text if title_el is not None and title_el.text else ""
+        link = link_el.text if link_el is not None and link_el.text else ""
+        if not title or title in seen:
+            continue
+        seen.add(title)
+        results.append({
+            "title": title,
+            "url": link,
+            "source": "36氪",
+            "score": 7,
+        })
+    return results
+
+
 # ── 公共 API ──────────────────────────────────
 
 
@@ -191,7 +249,7 @@ def fetch(source: str) -> list[dict]:
     if not parser:
         return []
 
-    if source in ("google", "relevant"):
+    if source in ("google", "relevant", "36kr"):
         raw = _get_text(cfg["url"])
     else:
         raw = _get_json(cfg["url"])

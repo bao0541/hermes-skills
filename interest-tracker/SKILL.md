@@ -81,6 +81,9 @@ related_skills: [news-fetcher]
 | 搜狐新闻 channel 8 | ~20 | 中文 | 正规媒体（新华社/澎湃等） |
 | Google News RSS | ~26 | 中文 | 多源聚合头条 |
 | Actually Relevant RSS | ~50 | 英语 | AI 精选全球新闻 |
+| **当前合计** | **~116** | | |
+
+另有 **新浪财经 API**（20条）和 **36氪 RSS**（30条）已验证待启用，总池可达 ~166条。
 
 匹配逻辑：`any(kw.lower() in title.lower() for kw in keywords)`
 
