@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Crypto Trading Simulator - Virtual Account Management
-Supports: balance, positions, buy, sell, history, reset
+Supports: long & short positions, balance, trades, history
 """
 import json
 import os
@@ -11,7 +11,6 @@ from datetime import datetime
 DATA_DIR = os.path.expanduser("~/.hermes/crypto-simulator/data")
 ACCOUNT_FILE = os.path.join(DATA_DIR, "account.json")
 TRADES_FILE = os.path.join(DATA_DIR, "trades.json")
-
 os.makedirs(DATA_DIR, exist_ok=True)
 
 def load_account():
@@ -49,37 +48,72 @@ def do_status():
         "pnl_pct": round(pnl_pct, 2),
         "positions": {},
         "position_value_usdt": 0,
+        "margin_locked_usdt": 0,
         "total_assets": round(bal, 2),
         "timestamp": datetime.now().isoformat()
     }
 
-    # Calculate position values
+    pos_value = 0
+    margin_locked = 0
     for symbol, pos in acc["positions"].items():
+        direction = pos.get("direction", "long")
         qty = pos["quantity"]
-        avg_price = pos["avg_price"]
-        result["positions"][symbol] = {
-            "quantity": qty,
-            "avg_price": avg_price,
-            "current_market_price": pos.get("current_price", avg_price),
-            "cost": round(qty * avg_price, 2),
-            "unrealized_pnl": 0  # Will be updated when market price is available
-        }
-        val = qty * pos.get("current_price", avg_price)
-        result["position_value_usdt"] += val
-        result["positions"][symbol]["value"] = round(val, 2)
+        entry_price = pos["avg_price"]
+        mkt_price = pos.get("current_price", entry_price)
 
-    result["total_assets"] = round(bal + result["position_value_usdt"], 2)
+        if direction == "long":
+            unrealized_pnl = (mkt_price - entry_price) * qty
+            val = mkt_price * qty
+            cost = entry_price * qty
+            margin_locked += cost
+        else:  # short
+            unrealized_pnl = (entry_price - mkt_price) * qty
+            val = entry_price * qty  # notional value (what we owe)
+            cost = entry_price * qty
+            margin_locked += cost
+
+        pos_value += val
+        result["positions"][symbol] = {
+            "direction": direction,
+            "quantity": qty,
+            "avg_price": entry_price,
+            "current_market_price": mkt_price,
+            "cost": round(cost, 2),
+            "value": round(val, 2),
+            "unrealized_pnl": round(unrealized_pnl, 2),
+            "unrealized_pnl_pct": round((unrealized_pnl / cost * 100) if cost > 0 else 0, 2),
+        }
+
+    result["position_value_usdt"] = round(pos_value, 2)
+    result["margin_locked_usdt"] = round(margin_locked, 2)
+    result["free_balance_usdt"] = round(bal - margin_locked, 2)
+    result["total_assets"] = round(bal + sum(
+        p["unrealized_pnl"] for p in result["positions"].values()
+    ), 2)
     return result
 
-def do_buy(symbol, quantity, price, reason=""):
+def do_open(symbol, direction, quantity, price, reason=""):
+    """Open a long or short position"""
     acc = load_account()
-    cost = quantity * price
-    if cost > acc["balance_usdt"]:
-        return {"success": False, "error": f"Insufficient balance. Need {cost:.2f} USDT, have {acc['balance_usdt']:.2f}"}
-
     symbol = symbol.upper()
 
-    # Update position
+    # Check if already have a position in this symbol (opposite direction not allowed)
+    if symbol in acc["positions"]:
+        existing = acc["positions"][symbol]
+        if existing.get("direction") != direction:
+            return {"success": False, "error": f"Already have a {existing['direction']} position in {symbol}. Close it first."}
+
+    cost = quantity * price  # notional value
+
+    if direction == "long":
+        if cost > acc["balance_usdt"]:
+            return {"success": False, "error": f"Insufficient balance. Need {cost:.2f} USDT, have {acc['balance_usdt']:.2f}"}
+        acc["balance_usdt"] -= cost
+    else:  # short
+        # For shorts, add the proceeds to balance (you sell first)
+        acc["balance_usdt"] += cost
+
+    # Update or create position
     if symbol in acc["positions"]:
         pos = acc["positions"][symbol]
         total_qty = pos["quantity"] + quantity
@@ -87,21 +121,25 @@ def do_buy(symbol, quantity, price, reason=""):
         pos["quantity"] = total_qty
         pos["avg_price"] = total_cost / total_qty
     else:
-        acc["positions"][symbol] = {"quantity": quantity, "avg_price": price}
+        acc["positions"][symbol] = {
+            "direction": direction,
+            "quantity": quantity,
+            "avg_price": price
+        }
 
-    acc["balance_usdt"] -= cost
     save_account(acc)
 
-    # Record trade
     trades = load_trades()
+    action_label = "open_long" if direction == "long" else "open_short"
     trade = {
-        "id": f"B{len(trades['trades'])+1:04d}",
+        "id": f"{action_label[0].upper()}{len(trades['trades'])+1:04d}",
         "timestamp": datetime.now().isoformat(),
         "symbol": symbol,
-        "action": "buy",
+        "action": action_label,
+        "direction": direction,
         "quantity": quantity,
         "price": price,
-        "cost": round(cost, 2),
+        "notional": round(cost, 2),
         "balance_after": round(acc["balance_usdt"], 2),
         "reason": reason
     }
@@ -110,7 +148,8 @@ def do_buy(symbol, quantity, price, reason=""):
 
     return {"success": True, "trade": trade}
 
-def do_sell(symbol, quantity=None, price=None, reason=""):
+def do_close(symbol, quantity=None, price=None, reason=""):
+    """Close a position (long: sell, short: buy back)"""
     acc = load_account()
     symbol = symbol.upper()
 
@@ -118,17 +157,28 @@ def do_sell(symbol, quantity=None, price=None, reason=""):
         return {"success": False, "error": f"No position in {symbol}"}
 
     pos = acc["positions"][symbol]
+    direction = pos.get("direction", "long")
     qty = quantity if quantity is not None and quantity <= pos["quantity"] else pos["quantity"]
 
     if quantity is not None and quantity > pos["quantity"]:
-        return {"success": False, "error": f"Insufficient {symbol}. Have {pos['quantity']}, want to sell {quantity}"}
+        return {"success": False, "error": f"Insufficient {symbol}. Have {pos['quantity']}, want to close {quantity}"}
 
     if price is None:
         price = pos.get("current_price", pos["avg_price"])
 
-    proceeds = qty * price
+    notional = qty * price
     cost_basis = qty * pos["avg_price"]
-    realized_pnl = proceeds - cost_basis
+
+    if direction == "long":
+        # Sell to close - get proceeds back
+        proceeds = notional
+        realized_pnl = proceeds - cost_basis
+        acc["balance_usdt"] += proceeds
+    else:  # short
+        # Buy back to close - pay the notional
+        proceeds = cost_basis  # this was the amount we got when opening
+        realized_pnl = cost_basis - notional  # entry_price - close_price * qty
+        acc["balance_usdt"] -= notional
 
     pos["quantity"] -= qty
     if pos["quantity"] <= 0:
@@ -136,18 +186,19 @@ def do_sell(symbol, quantity=None, price=None, reason=""):
     else:
         acc["positions"][symbol] = pos
 
-    acc["balance_usdt"] += proceeds
     save_account(acc)
 
     trades = load_trades()
+    action_label = "close_long" if direction == "long" else "close_short"
     trade = {
-        "id": f"S{len(trades['trades'])+1:04d}",
+        "id": f"C{len(trades['trades'])+1:04d}",
         "timestamp": datetime.now().isoformat(),
         "symbol": symbol,
-        "action": "sell",
+        "action": action_label,
+        "direction": direction,
         "quantity": qty,
         "price": price,
-        "proceeds": round(proceeds, 2),
+        "notional": round(notional, 2),
         "realized_pnl": round(realized_pnl, 2),
         "balance_after": round(acc["balance_usdt"], 2),
         "reason": reason
@@ -168,7 +219,6 @@ def do_history(limit=20):
     return trades["trades"][-limit:]
 
 def do_update_prices(prices):
-    """Update current market prices for all positions"""
     acc = load_account()
     for symbol, price in prices.items():
         if symbol in acc["positions"]:
@@ -181,19 +231,39 @@ if __name__ == "__main__":
     if command == "status":
         result = do_status()
         print(json.dumps(result, indent=2))
-    elif command == "buy":
+    elif command == "open":
         symbol = sys.argv[2]
-        qty = float(sys.argv[3])
-        price = float(sys.argv[4])
-        reason = sys.argv[5] if len(sys.argv) > 5 else ""
-        result = do_buy(symbol, qty, price, reason)
-        print(json.dumps(result, indent=2))
-    elif command == "sell":
+        direction = sys.argv[3].lower()
+        qty = float(sys.argv[4])
+        price = float(sys.argv[5])
+        reason = sys.argv[6] if len(sys.argv) > 6 else ""
+        if direction not in ("long", "short"):
+            print(json.dumps({"success": False, "error": f"Invalid direction '{direction}'. Use 'long' or 'short'."}))
+        else:
+            result = do_open(symbol, direction, qty, price, reason)
+            print(json.dumps(result, indent=2))
+    elif command == "close":
         symbol = sys.argv[2]
         qty = float(sys.argv[3]) if len(sys.argv) > 3 else None
         price = float(sys.argv[4]) if len(sys.argv) > 4 else None
         reason = sys.argv[5] if len(sys.argv) > 5 else ""
-        result = do_sell(symbol, qty, price, reason)
+        result = do_close(symbol, qty, price, reason)
+        print(json.dumps(result, indent=2))
+    elif command == "buy":
+        # Legacy: open long
+        symbol = sys.argv[2]
+        qty = float(sys.argv[3])
+        price = float(sys.argv[4])
+        reason = sys.argv[5] if len(sys.argv) > 5 else ""
+        result = do_open(symbol, "long", qty, price, reason)
+        print(json.dumps(result, indent=2))
+    elif command == "sell":
+        # Legacy: close position
+        symbol = sys.argv[2]
+        qty = float(sys.argv[3]) if len(sys.argv) > 3 else None
+        price = float(sys.argv[4]) if len(sys.argv) > 4 else None
+        reason = sys.argv[5] if len(sys.argv) > 5 else ""
+        result = do_close(symbol, qty, price, reason)
         print(json.dumps(result, indent=2))
     elif command == "reset":
         bal = float(sys.argv[2]) if len(sys.argv) > 2 else 1000.0
@@ -210,4 +280,4 @@ if __name__ == "__main__":
         print(json.dumps({"success": True}))
     else:
         print(f"Unknown command: {command}")
-        print("Usage: crypto_account.py [status|buy|sell|reset|history|update_prices]")
+        print("Usage: crypto_account.py [status|open|close|buy|sell|reset|history|update_prices]")
