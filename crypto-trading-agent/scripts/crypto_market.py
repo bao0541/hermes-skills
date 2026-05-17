@@ -24,7 +24,7 @@ def fetch_market_data(symbol="ETH/USDT"):
     # Multi-timeframe OHLCV
     timeframes = {
         "15m": 96,   # 24 hours of 15m candles
-        "1h": 72,     # 3 days of 1h candles
+        "1h": 240,    # 10 days of 1h candles (need 200 for EMA200)
         "4h": 42,     # 7 days of 4h candles
         "1d": 30,     # 30 days
     }
@@ -87,6 +87,12 @@ def calculate_indicators(klines):
             r["MA25"] = float(np.mean(close[-25:]))
         if len(close) >= 99:
             r["MA99"] = float(np.mean(close[-99:]))
+        if len(close) >= 200:
+            r["MA200"] = float(np.mean(close[-200:]))
+            # 200 EMA (exponential, more weight on recent)
+            ema200 = pd.Series(close).ewm(span=200, adjust=False).mean().values[-1]
+            r["EMA200"] = round(float(ema200), 2)
+            r["price_vs_EMA200"] = round((current / ema200 - 1) * 100, 2)
 
         # Price position relative to MA
         current = float(close[-1])

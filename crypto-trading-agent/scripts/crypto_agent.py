@@ -67,6 +67,12 @@ def main(symbol="ETH/USDT"):
             "bb_position_1h": market["technical_indicators"]["1h"].get("bollinger_signal", "within_bands"),
             "supertrend_1h": market["technical_indicators"]["1h"].get("supertrend", {}).get("trend", "unknown"),
             "supertrend_4h": market["technical_indicators"]["4h"].get("supertrend", {}).get("trend", "unknown"),
+            "ema200_1h": market["technical_indicators"]["1h"].get("EMA200", 0),
+            "price_vs_ema200_1h": market["technical_indicators"]["1h"].get("price_vs_EMA200", 0),
+            "atr_1h_dollars": market["technical_indicators"]["1h"].get("ATR", 0),
+            "atr_1h_pct": market["technical_indicators"]["1h"].get("ATR_pct", 0),
+            "supertrand_stop_distance": 0,  # calc below
+            "position_multiplier": 0,  # anti-martingale tracker
             "volume_1h": market["technical_indicators"]["1h"].get("volume_signal", "normal"),
             "volatility_level": market["volatility"]["status"],
             "volatility_daily_pct": market["volatility"]["daily_volatility_pct"],

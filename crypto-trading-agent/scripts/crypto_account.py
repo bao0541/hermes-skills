@@ -17,7 +17,7 @@ def load_account():
     if os.path.exists(ACCOUNT_FILE):
         with open(ACCOUNT_FILE) as f:
             return json.load(f)
-    return {"balance_usdt": 1000.0, "positions": {}, "initial_balance": 1000.0}
+    return {"balance_usdt": 1000.0, "positions": {}, "initial_balance": 1000.0, "anti_martingale": {"multiplier": 1.0, "consecutive_wins": 0, "consecutive_losses": 0}}
 
 def save_account(acc):
     with open(ACCOUNT_FILE, "w") as f:
@@ -90,6 +90,15 @@ def do_status():
     result["total_assets"] = round(bal + sum(
         p["unrealized_pnl"] for p in result["positions"].values()
     ), 2)
+
+    # Anti-martingale status
+    am = acc.get("anti_martingale", {"multiplier": 1.0, "consecutive_wins": 0, "consecutive_losses": 0})
+    result["anti_martingale"] = {
+        "multiplier": am.get("multiplier", 1.0),
+        "consecutive_wins": am.get("consecutive_wins", 0),
+        "consecutive_losses": am.get("consecutive_losses", 0),
+    }
+
     return result
 
 def do_open(symbol, direction, quantity, price, reason=""):
@@ -182,6 +191,16 @@ def do_close(symbol, quantity=None, price=None, reason=""):
 
     pos["quantity"] -= qty
     if pos["quantity"] <= 0:
+        # Position fully closed - update anti-martingale multiplier
+        am = acc.setdefault("anti_martingale", {"multiplier": 1.0, "consecutive_wins": 0, "consecutive_losses": 0})
+        if realized_pnl > 0:
+            am["multiplier"] = min(round(am["multiplier"] * 1.5, 2), 3.0)  # cap at 3x
+            am["consecutive_wins"] += 1
+            am["consecutive_losses"] = 0
+        else:
+            am["multiplier"] = 1.0
+            am["consecutive_losses"] += 1
+            am["consecutive_wins"] = 0
         del acc["positions"][symbol]
     else:
         acc["positions"][symbol] = pos
@@ -209,7 +228,8 @@ def do_close(symbol, quantity=None, price=None, reason=""):
     return {"success": True, "trade": trade}
 
 def do_reset(initial_balance=1000.0):
-    acc = {"balance_usdt": float(initial_balance), "positions": {}, "initial_balance": float(initial_balance)}
+    acc = {"balance_usdt": float(initial_balance), "positions": {}, "initial_balance": float(initial_balance),
+           "anti_martingale": {"multiplier": 1.0, "consecutive_wins": 0, "consecutive_losses": 0}}
     save_account(acc)
     save_trades({"trades": []})
     return {"success": True, "initial_balance": float(initial_balance)}
