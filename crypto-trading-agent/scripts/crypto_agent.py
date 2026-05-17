@@ -65,6 +65,8 @@ def main(symbol="ETH/USDT"):
             "macd_1h": market["technical_indicators"]["1h"].get("macd_signal", "neutral"),
             "macd_4h": market["technical_indicators"]["4h"].get("macd_signal", "neutral"),
             "bb_position_1h": market["technical_indicators"]["1h"].get("bollinger_signal", "within_bands"),
+            "supertrend_1h": market["technical_indicators"]["1h"].get("supertrend", {}).get("trend", "unknown"),
+            "supertrend_4h": market["technical_indicators"]["4h"].get("supertrend", {}).get("trend", "unknown"),
             "volume_1h": market["technical_indicators"]["1h"].get("volume_signal", "normal"),
             "volatility_level": market["volatility"]["status"],
             "volatility_daily_pct": market["volatility"]["daily_volatility_pct"],

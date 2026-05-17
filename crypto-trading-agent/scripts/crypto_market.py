@@ -193,9 +193,70 @@ def calculate_indicators(klines):
             r["ATR"] = round(float(atr), 2)
             r["ATR_pct"] = round(float(atr / current * 100), 2)
 
+        # SuperTrend indicator (ATR period=10, multiplier=3 - standard setting)
+        if len(close) >= 11:
+            supertrend = calculate_supertrend(high, low, close, period=10, multiplier=3)
+            r["supertrend"] = {
+                "trend": supertrend["trend"],
+                "value": round(float(supertrend["value"]), 2),
+                "distance_pct": round(float((current / supertrend["value"] - 1) * 100), 2),
+            }
+
         results[tf] = r
 
     return results
+
+def calculate_supertrend(high, low, close, period=10, multiplier=3):
+    """Calculate SuperTrend indicator.
+    Returns current trend direction and the super trend line value.
+    """
+    length = len(close)
+    # Calculate True Range
+    tr = np.zeros(length)
+    for i in range(1, length):
+        tr[i] = max(high[i] - low[i],
+                    abs(high[i] - close[i-1]),
+                    abs(low[i] - close[i-1]))
+    tr[0] = high[0] - low[0]
+
+    # ATR using Wilder's smoothing (SMA then EMA-like)
+    atr = np.zeros(length)
+    atr[0] = np.mean(tr[:period]) if length >= period else tr[0]
+    for i in range(1, min(length, 50)):
+        if i < period:
+            atr[i] = np.mean(tr[:i+1])
+        else:
+            atr[i] = (atr[i-1] * (period - 1) + tr[i]) / period
+
+    # Basic bands
+    hl_avg = (high + low) / 2
+    upper_band = hl_avg + multiplier * atr
+    lower_band = hl_avg - multiplier * atr
+
+    # SuperTrend logic
+    supertrend = np.zeros(length)
+    direction = np.ones(length)  # 1 = uptrend, -1 = downtrend
+
+    for i in range(1, length):
+        if close[i] > upper_band[i]:
+            direction[i] = 1
+        elif close[i] < lower_band[i]:
+            direction[i] = -1
+        else:
+            direction[i] = direction[i-1]
+
+        if direction[i] == 1:
+            supertrend[i] = max(lower_band[i], supertrend[i-1] if i > 0 else lower_band[i])
+        else:
+            supertrend[i] = min(upper_band[i], supertrend[i-1] if i > 0 else upper_band[i])
+
+    current_direction = direction[-1]
+    return {
+        "trend": "up" if current_direction == 1 else "down",
+        "value": supertrend[-1],
+        "direction_change": direction[-1] != direction[-2] if length >= 2 else False,
+    }
+
 
 def volatility_assessment(df):
     """Assess volatility from a dataframe"""
