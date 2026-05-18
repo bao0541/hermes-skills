@@ -108,7 +108,7 @@ python3 ~/.hermes/scripts/news_fetcher.py --source=36kr
 
 ```python
 import sys
-sys.path.insert(0, "/home/ubuntu/.hermes/scripts")
+sys.path.insert(0, "~/.hermes/scripts")
 from news_fetcher import fetch_all
 ```
 
