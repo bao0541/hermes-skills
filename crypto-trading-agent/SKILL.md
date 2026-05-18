@@ -1,7 +1,7 @@
 ---
 name: crypto-trading-agent
 description: 🤖 AI盯盘自动炒币系统 — 基于研究的趋势跟踪策略。1h SuperTrend + 200EMA过滤 + 反马丁格尔仓位管理。
-version: 1.2.1
+version: 1.3.0
 tags: [crypto, trading, eth, supertrend, ema200, anti-martingale, 自动炒币, 量化]
 ---
 
@@ -73,6 +73,7 @@ tags: [crypto, trading, eth, supertrend, ema200, anti-martingale, 自动炒币, 
 | 1.0.1 | 加费用约定、运行成本 |
 | 1.0.2 | 加SuperTrend指标 |
 | 1.1.0 | 支持双向交易、动态止盈、分批止盈 |
+| **1.3.0** | **Bugfix: SuperTrend信号翻转逻辑修复。改用已完成蜡烛确定方向（direction[-2]），避免实时价格紧贴ST线时毫秒级false flip-flop。cron prompt增加同轮平仓后不开新仓规则，移除密集检查功能** |
 | **1.2.1** | **Bugfix: 做空时总资产/收益率计算错误。修复total_assets公式为 free_balance + unrealized_pnl；修复crypto_agent.py做空未实现盈亏计算复用 `value-cost` 导数为0的问题** |
 | 1.2.0 | 全面重构 — 研究驱动的新策略。去掉固定止盈/动态止盈/分批止盈/半仓试探/日线过滤，改用200EMA趋势过滤+SuperTrend翻转出场+反马丁格尔仓位管理 |
 
@@ -83,6 +84,8 @@ tags: [crypto, trading, eth, supertrend, ema200, anti-martingale, 自动炒币, 
 | 市场数据 | `~/.hermes/crypto-simulator/scripts/crypto_market.py` | 币安行情+技术指标（SuperTrend, EMA200, ATR） |
 | 账户管理 | `~/.hermes/crypto-simulator/scripts/crypto_account.py` | 双向交易+反马丁格尔跟踪 |
 | 综合分析 | `~/.hermes/crypto-simulator/scripts/crypto_agent.py` | AI消费用摘要输出 |
+
+> 参考：`references/short-position-accounting.md` — 做空仓位账户计算模型详解与调试 trace
 
 ## 使用
 
@@ -102,3 +105,30 @@ python3 ~/.hermes/crypto-simulator/scripts/crypto_account.py close ETH/USDT <数
 # 重置
 python3 ~/.hermes/crypto-simulator/scripts/crypto_account.py reset 1000
 ```
+
+## 常见陷阱 / Pitfalls
+
+### 1. 做空时 total_assets 计算
+
+**不要用 `balance_usdt + unrealized_pnl` 算总资产。** 做空时 `balance_usdt` 包含卖空本金（notional），导致总资产虚高。
+
+✅ 正确公式：
+```
+total_assets = (balance_usdt - margin_locked) + unrealized_pnl
+             = free_balance + unrealized_pnl
+```
+
+做多时可以直接 `balance + unrealized_pnl`，因为做多时 balance 被扣除了成本。做空则必须扣除锁定保证金。
+
+### 2. crypto_agent.py 中的 unrealized PnL
+
+**不要用 `value - cost` 重算未实现盈亏。** 对于做空仓位，`value = entry_price × qty` 等于 `cost`，差值恒为 0。
+
+✅ 正确做法：直接从 account status 的 `unrealized_pnl` 字段取值：
+```python
+total_upnl = sum(pos.get("unrealized_pnl", 0) for pos in acc["positions"].values())
+```
+
+### 3. 反马丁格尔乘数更新时机
+
+乘数只在 **完全平仓后** 才更新（code: `do_close()` 中 `if pos["quantity"] <= 0`）。部分平仓不会触发乘数调整。做信号开仓决策时要检查 `anti_martingale.multiplier` 字段。

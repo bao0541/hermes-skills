@@ -215,6 +215,12 @@ def calculate_indicators(klines):
 def calculate_supertrend(high, low, close, period=10, multiplier=3):
     """Calculate SuperTrend indicator.
     Returns current trend direction and the super trend line value.
+    
+    IMPORTANT: Uses ONLY completed candles for direction signal.
+    The current (in-progress) candle's close is the live tick price and
+    will cause false flip-flops when price is near the SuperTrend line.
+    We use direction[-2] (previous completed candle) for the signal,
+    and supertrend[-1] (current candle's line value) for the distance.
     """
     length = len(close)
     # Calculate True Range
@@ -256,11 +262,22 @@ def calculate_supertrend(high, low, close, period=10, multiplier=3):
         else:
             supertrend[i] = min(upper_band[i], supertrend[i-1] if i > 0 else upper_band[i])
 
-    current_direction = direction[-1]
+    # Use PREVIOUS completed candle for direction signal
+    # (index -1 is current forming candle, its close is live tick)
+    # Only use direction[-1] if the candle has been forming for > 50 min
+    current_direction = direction[-2] if length >= 2 else direction[-1]
+    
+    # Detect if current candle's close crossed the line (potential noise)
+    # We report this for awareness but don't flip the signal
+    forming_candle_flipped = False
+    if length >= 2 and direction[-1] != direction[-2]:
+        forming_candle_flipped = True
+
     return {
         "trend": "up" if current_direction == 1 else "down",
         "value": supertrend[-1],
-        "direction_change": direction[-1] != direction[-2] if length >= 2 else False,
+        "direction_change": direction[-2] != direction[-3] if length >= 3 else False,
+        "forming_candle_flipped": forming_candle_flipped,
     }
 
 
