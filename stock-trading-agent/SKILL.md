@@ -1,257 +1,226 @@
 ---
 name: stock-trading-agent
-description: 自动炒股Agent - 两阶段架构：分析计划(09:00/11:35/15:05) + 盘执行器(每15分钟盘中成交)。新闻+技术评分→自主买卖，T+1锁定，涨跌幅限制。
-version: 1.3.0
-tags: [stock, trading, agent, ai-trading, 自动选股, 量化, a-share]
+description: 自动炒股Agent v2.0 — 三层选股池+多因子评分+动态止盈止损+5只持仓上限+A股T+1适配
+version: 2.0.0
+tags: [stock, trading, agent, ai-trading, 自动选股, 量化, a-share, 多因子, 止盈止损]
 related_skills: [interest-tracker]
 ---
 
-# 📈 自动炒股Agent
+# 📈 自动炒股Agent v2.0
 
 ## 概述
 
-新闻驱动 + 技术分析 + 自主交易的自动化炒股系统。**两阶段分离架构**：
+多因子选股 + 动态止盈止损 + 突发事件监控的自动化A股交易系统。
 
-1. **📋 分析计划** — 在休市期生成买入/卖出订单计划
-2. **⚡ 盘执行器** — 在交易时段（每15分钟）执行待处理订单
-
-遵循A股实盘规则：T+1锁定、涨跌幅限制、交易时段过滤、按手取整。
-
----
-
-## 架构详解
-
-| 组件 | 脚本 | 运行时间 | 职责 |
-|:----|:----|:--------:|:----|
-| 📋 开盘前分析 | `stock_agent.py --session pre-market` | `09:00` 交易日 | 分析→生成订单计划（不下单成交） |
-| 📋 午盘分析 | `stock_agent.py --session midday` | `11:35` 交易日 | 复盘→生成下午订单计划 |
-| 📋 收盘复盘 | `stock_agent.py --session close` | `15:05` 交易日 | 纯复盘，不生成任何订单 |
-| ⚡ 盘执行器 | `stock_executor.py` | `*/15 9-14 * * 1-5` | 盘中每15分钟成交待处理订单 |
-
-### 实盘规则
-
-| 规则 | 实现 |
-|------|------|
-| **T+1 锁定** | `agent_t1_tracker.json` 记录今日买入股数，当日不可卖 |
-| **涨跌幅限制** | 主板±10%，688/300开头±20%（`stock_agent.py` 代码级限制） |
-| **交易时段过滤** | 09:30-11:30 / 13:00-14:57，执行器自行判断，非交易时段静默退出 |
-| **休市不下单** | Agent只在09:00/11:35生成订单计划，盘执行器只在交易时段成交 |
+**核心改进：**
+- 🎯 **三层选股池**：全市场 → 粗筛(~30只) → 精选(最多5只持仓)
+- 📊 **多因子评分**：技术面+新闻面+板块+估值，纯Python粗筛，LLM精评
+- 🛡️ **动态止盈止损**：初始-8%/+15%，浮动追踪上移
+- 🚨 **事件监控**：个股急跌>5%/大盘暴跌>3%/板块暴跌>4%，被动推送
+- 💰 **10万起步**，T+1适配，1手100股规则
 
 ---
 
-## 文件清单
+## 架构
 
-### 脚本（`~/.hermes/scripts/`）
-
-| 文件 | 说明 |
-|------|------|
-| `stock_agent.py` | 分析计划主脚本，3个session模式 |
-| `stock_executor.py` | 盘执行器，盘中每15分钟运行 |
-| `stock_premarket.sh` | 包装脚本：`python3 stock_agent.py --session pre-market` |
-| `stock_midday.sh` | 包装脚本：`python3 stock_agent.py --session midday` |
-| `stock_close.sh` | 包装脚本：`python3 stock_agent.py --session close` |
-| `stock_executor.sh` | 包装脚本：`python3 stock_executor.py` |
-| `morning_briefing.py` | 每日新闻简报（独立任务，08:30运行） |
-
-### 数据文件（`~/.hermes/stock-trading-logs/orders/`）
-
-订单文件按日期生成，**只有生成订单的交易日才会创建文件**（全HOLD不产生文件）：
-
-| 文件 | 说明 |
-|------|------|
-| `orders_2026-05-18.json` | 5月18日有交易操作 |
-| (不存在) | 5月19日全HOLD，无文件 |
-
-文件结构：
-```json
-{
-  "orders": [
-    {
-      "id": "abc12345",
-      "date": "2026-05-18",
-      "created_session": "pre-market",
-      "code": "SH688041",
-      "action": "buy",
-      "shares": 300,
-      "status": "executed",    // pending→executed/cancelled
-      "executed_price": 305.20
-    }
-  ]
-}
+```
+08:00 ─────→ 选股粗筛 (纯Python，零LLM)
+             stock_screener.py
+             ↓ 候选30只JSON
+08:30 ─────→ 每日新闻简报 (morning_briefing.py)
+09:00 ─────→ 开盘前分析 (stock_agent.py --session pre-market)
+             │  ① 加载候选池
+             │  ② 多因子评分
+             │  ③ 生成买入/卖出订单
+             ↓ 订单JSON
+09:15-14:45 ─→ 事件监控 (stock_event_watcher.py, 每15分钟)
+             │  遇突发→飞书推送
+             ↓
+09:30-14:57 ─→ 盘执行器 (stock_executor.py, 每15分钟)
+                 执行待处理订单
+                 触发止盈止损
+11:35 ─────→ 午盘分析 (stock_agent.py --session midday)
+             复盘+止盈止损调整
+15:05 ─────→ 收盘复盘 (stock_agent.py --session close)
+             统计+浮动止盈更新
 ```
 
-### 其他数据文件（`~/.hermes/skills/stock-trading-simulator/data/`）
+### 三层股票池
+
+| 层 | 名称 | 脚本 | LLM | 数量 | 说明 |
+|:--|:-----|:-----|:---:|:----:|:-----|
+| A | 粗筛池 | `stock_screener.py` | ❌ | ~30只 | 按成交量排前500→基础过滤(ST/市值/价格)→技术评分 |
+| B | 精选池 | `stock_agent.py` (pre-market) | ✅ | 候选 | 多因子评分+LLM精评 |
+| C | 执行池 | `stock_executor.py` | ❌ | ≤5只 | 持仓上限5只，买入执行 |
+
+### 核心配置
+
+| 参数 | 值 | 说明 |
+|:-----|:--:|:------|
+| 初始资金 | ¥100,000 | 模拟盘 |
+| 最大持仓 | 5只 | 分散风险 |
+| 最低现金 | ¥20,000 | 应急保留 |
+| 单板块上限 | 40% | 避免板块集中 |
+| 止损 | -8% → 浮动追踪 | 初始固定，盈利后浮动 |
+| 止盈 | +15% → 浮动上移 | 盈利超过后追踪回撤5% |
+| 浮动止盈激活 | +10% | 盈利超过后启动追踪 |
+| T+1 | 当日买入不可卖 | agent_t1_tracker.json记录 |
+
+---
+
+## 组件清单
+
+### 脚本 (`~/.hermes/scripts/`)
+
+| 文件 | 类型 | LLM | 运行时间 | 说明 |
+|------|:----:|:---:|:--------:|:------|
+| `stock_screener.py` | 纯Python | ❌ | 08:00 | 选股粗筛 |
+| `stock_agent.py` | AI Agent | ✅ | 09:00/11:35/15:05 | 多因子分析+决策 |
+| `stock_executor.py` | 纯Python | ❌ | 每15分钟盘中 | 订单成交 |
+| `stock_event_watcher.py` | 纯Python | ❌ | 每15分钟盘中 | 突发事件监控 |
+| `market_calendar.py` | 工具 | ❌ | - | 交易日历 |
+
+### Shell 包装脚本
+
+| 文件 | 调用 |
+|------|:-----|
+| `stock_screener.sh` | `python3 ~/.hermes/scripts/stock_screener.py` |
+| `stock_premarket.sh` | `python3 ~/.hermes/scripts/stock_agent.py --session pre-market` |
+| `stock_midday.sh` | `python3 ~/.hermes/scripts/stock_agent.py --session midday` |
+| `stock_close.sh` | `python3 ~/.hermes/scripts/stock_agent.py --session close` |
+| `stock_executor.sh` | `python3 ~/.hermes/scripts/stock_executor.py` |
+| `stock_event_watcher.sh` | `python3 ~/.hermes/scripts/stock_event_watcher.py` |
+
+### 数据文件
 
 | 文件 | 说明 |
-|------|------|
-| `account.json` | 模拟账户：现金、持仓、初始本金 |
-| `trades.json` | 交易历史记录 |
-| `agent_t1_tracker.json` | **T+1锁定**：记录今日买入股数 |
+|:-----|:------|
+| `~/.hermes/skills/stock-trading-simulator/data/account.json` | 模拟账户(现金+持仓) |
+| `~/.hermes/skills/stock-trading-simulator/data/trades.json` | 交易历史 |
+| `~/.hermes/skills/stock-trading-simulator/data/agent_t1_tracker.json` | T+1锁定记录 |
+| `~/.hermes/stock-trading-logs/orders/orders_YYYY-MM-DD.json` | 当日订单 |
+| `~/.hermes/stock-trading-logs/candidates_YYYY-MM-DD.json` | 选股候选池 |
+| `~/.hermes/stock-trading-logs/stop_config.json` | 止盈止损配置 |
 
-### 日志（`~/.hermes/stock-trading-logs/`）
+### 日志
 
 | 文件模式 | 说明 |
-|----------|------|
-| `analysis_YYYY-MM-DD_pre-market.log` | 开盘前分析结果 |
-| `analysis_YYYY-MM-DD_midday.log` | 午盘分析结果 |
+|:---------|:------|
+| `screener_YYYY-MM-DD.log` | 选股粗筛日志 |
+| `analysis_YYYY-MM-DD_pre-market.log` | 开盘前分析 |
+| `analysis_YYYY-MM-DD_midday.log` | 午盘分析 |
 | `analysis_YYYY-MM-DD_close.log` | 收盘复盘 |
-| `executor_YYYY-MM-DD.log` | 盘执行器成交记录（追加模式） |
+| `executor_YYYY-MM-DD.log` | 盘执行器成交记录 |
+| `event_watcher_YYYY-MM-DD.log` | 事件监控日志 |
+| `event_log.json` | 事件去重记录 |
+| `skip_YYYY-MM-DD_*.log` | 非交易日跳过记录 |
 
 ---
 
-## 候选股票池
+## 选股粗筛 (`stock_screener.py`)
 
-**当前持仓（8只，总资产~100万）：**
-| 代码 | 名称 | 成本 | 状态 |
-|------|------|:----:|:----:|
-| SH688981 | 中芯国际 | 1,600股 @ 119.02 | 芯片制造龙头 |
-| SZ300059 | 东方财富 | 10,100股 @ 19.73 | 券商受益牛市 |
-| SZ001309 | 德明利 | 50股 @ 712.06 | 迷你仓位 |
-| SH688041 | 海光信息 | 300股 @ 303.01 | 国产GPU/AI芯片 |
-| SH603019 | 中科曙光 | 1,200股 @ 94.46 | AI算力基础设施 |
-| SH603501 | 韦尔股份(豪威集团) | 500股 @ 101.39 | 汽车CIS放量 |
-| SZ000938 | 紫光股份 | 1,800股 @ 31.91 | Q1净利+126% |
-| SZ300750 | 宁德时代 | 100股 @ 423.60 | 新能源电池龙头 |
+纯Python脚本，零LLM消耗。
 
-**候选观察：**
-| 代码 | 名称 | 逻辑 | 优先级 |
-|------|------|------|:------:|
-| SZ002371 | 北方华创 | 半导体设备，RSI高位需等待 | medium |
+**数据源：** 新浪财经API (`vip.stock.finance.sina.com.cn`)
 
----
+**过滤条件：**
+1. 排除 `ST/*ST/退市/N/C` 股
+2. 总市值 > 5亿
+3. 股价 3~500元
+4. 换手率 > 0.3%
 
-## 评分系统
+**评分维度：**
+- 均线排列（多头/空头，±6分）
+- MACD（金叉/死叉，±3分）
+- RSI（超卖/超买，±2分）
+- 成交量（放量，+2分）
+- 换手率活跃度（+3分）
 
-### 新闻面评分（-10~10，权重40%）
-
-由 `get_news_score()` 函数维护在 `stock_agent.py` 中。评分标准：
-- 业绩超预期：+2~3
-- 行业景气度确认：+1~2
-- 政策重大利好：+2
-- 国产替代利好：+1~2
-- 短期利空（减持/制裁）：-1~2
-
-**需每周更新**以反映最新新闻。更新方式：
-```bash
-grep -A3 'scores = {' ~/.hermes/scripts/stock_agent.py
-# 编辑后测试
-python3 ~/.hermes/scripts/stock_agent.py --session close
-```
-
-### 技术面评分（-10~10，权重60%）
-
-| 指标 | 加分 | 减分 |
-|------|:----:|:----:|
-| 均线排列 | 多头+3 | 空头-3 |
-| RSI | 30~55之间+1~2 | >75超买-2，<25超卖+3 |
-| MACD | 金叉+3，多头+1 | 死叉-3，空头-1 |
-| 布林带 | 跌破下轨+2 | 突破上轨-1 |
-
-### 综合评分
-`综合分 = 新闻分×0.4 + 技术分×0.6`
-
-### 决策阈值
-
-| 条件 | 操作 | 仓位 |
-|------|------|:----:|
-| 综合分 >= 5.0 | 生成买入订单 | 现金的20%（最高20万） |
-| 综合分 >= 2.0 | 生成轻仓订单 | 现金的10%（最高10万） |
-| 亏损 >= 8% | 生成止损卖出订单 | 全部 |
-| 盈利 >= 20% + 技术转弱 | 生成止盈订单 | 一半 |
-| 综合分 <= -4.0 | 生成卖出订单 | 全部 |
-| MACD死叉 + RSI>=70 | 生成减仓订单 | 一半 |
+**输出：** `candidates_YYYY-MM-DD.json` + 控制台日志
 
 ---
 
-## 订单生命周期
+## 多因子分析 (`stock_agent.py`)
+
+### 评分权重
+
+| 因子 | 权重 | 说明 |
+|:-----|:----:|:------|
+| 技术面 | 30% | 选股器评分 + 二次确认 |
+| 新闻面 | 30% | LLM实时分析当日新闻 |
+| 板块 | 20% | 热门板块 + 分散度检查 |
+| 资金/估值 | 20% | PE/PB + 资金流向 |
+
+### 买入规则
+
+| 条件 | 操作 |
+|:-----|:------|
+| 选股评分 >= 3 + 现金充足 | `buy`（正常仓位） |
+| 选股评分 < 3 但有亮点 | `buy_light`（轻仓） |
+| 已有5只持仓 | 不买入 |
+| 现金 < 最低保留 | 不买入 |
+| 同板块已有持仓 | 跳过多只同板块 |
+| 1手 > 3万元 | 跳过（资金限制） |
+
+### 仓位计算
 
 ```
-agent_orders.json 结构：
-{
-  "orders": [
-    {
-      "id": "abc12345",           ← 哈希ID
-      "date": "2026-05-18",
-      "created_session": "pre-market",  ← 哪个时段生成的
-      "created_at": "2026-05-18 09:00",
-      "code": "SH688041",
-      "name": "海光信息",
-      "action": "buy",              ← buy/buy_light/sell_all/sell_half
-      "shares": 300,
-      "reason": "综合分5.0，买入",
-      "price_ref": 303.01,
-      "status": "pending"           ← pending→executed/cancelled
-    }
-  ]
-}
-
-生命周期：
-  09:00 Agent生成 → status=pending
-  09:30 执行器检查 → 盘中 → 调用stock_trader.py成交 → status=executed
-              非盘中 → 保留pending，下次再试
-  11:35 Agent生成新的 → 继续pending
-  13:00 执行器成交
-  15:05 收盘总结
-  次日清理旧的cancelled/executed订单
+可用资金 = 总现金 - 最低保留(¥20,000)
+每只投入 = 可用资金 / 剩余空位
+买入股数 = floor(每只投入 / 股价 / 100) × 100
 ```
 
 ---
 
-## 定时任务一览
+## 动态止盈止损
 
-```bash
-cronjob action=list
-```
+### 初始设置
+- **止损价** = 买入价 × (1 - 8%) = 买入价的92%
+- **止盈价** = 买入价 × (1 + 15%) = 买入价的115%
+
+### 浮动追踪
+- 当盈利 > **+10%** 时，启动浮动止损
+- 浮动止损价 = 最高价 × (1 - 5%)
+- 当盈利 > **+15%** 时，止盈线上移
+- 止盈线 = 最高价 × (1 - 5%)，但高于上一个止盈价
+
+### 每日更新
+- 每次analysis运行（09:00/11:35/15:05）更新全部持仓的止盈止损
+- 最高价更新 → 浮动止损自动上移
+- 数据持久化在 `stop_config.json`
+
+---
+
+## 事件监控 (`stock_event_watcher.py`)
+
+| 事件类型 | 阈值 | 触发操作 |
+|:---------|:----:|:---------|
+| 🔴 大盘暴跌 | 上证/深证/创业板 < -3% | 通知agent暂停开仓 |
+| 🟠 板块暴跌 | 板块指数 < -4% | 通知agent检查板块持仓 |
+| 🟠 持仓股急跌 | 持仓个股 < -5% | 通知agent检查止损 |
+
+- 同类型同标的同一天不重复推送
+- 无事件时静默（不发送飞书）
+- 每次触发写入事件日志
+
+---
+
+## 定时任务
 
 | 名称 | 时间 | 脚本 | 节假日 | 说明 |
-|:----|:----:|:----|:------:|:----|
-| 每日新闻简报 | `30 8 * * *` 每天08:30 | `morning_briefing.py` | ✅ 不休 | 综合+极客新闻 |
+|:----|:----:|:----|:------:|:-----|
+| 选股-粗筛 | `0 8 * * 1-5` 工作日08:00 | `stock_screener.sh` | ❌ 休市跳过 | 全市场选股 |
+| 每日新闻简报 | `30 8 * * *` 每天08:30 | `morning_briefing.py` | ✅ 不休 | 综合新闻 |
 | 选股-开盘前 | `0 9 * * 1-5` 工作日09:00 | `stock_premarket.sh` | ❌ 休市跳过 | 分析→生成订单 |
+| 事件监控 | `*/15 9-14 * * 1-5` 盘中每15分钟 | `stock_event_watcher.sh` | ❌ 休市跳过 | 突发事件推送 |
+| 盘执行器 | `*/15 9-14 * * 1-5` 盘中每15分钟 | `stock_executor.sh` | ❌ 休市跳过 | 成交订单 |
 | 选股-午盘 | `35 11 * * 1-5` 工作日11:35 | `stock_midday.sh` | ❌ 休市跳过 | 复盘→生成订单 |
-| 选股-收盘 | `5 15 * * 1-5` 工作日15:05 | `stock_close.sh` | ❌ 休市跳过 | 仅复盘不交易 |
-| 盘执行器 | `*/15 9-14 * * 1-5` 每15分钟 | `stock_executor.sh` | ❌ 休市跳过 | 盘中成交订单 |
+| 选股-收盘 | `5 15 * * 1-5` 工作日15:05 | `stock_close.sh` | ❌ 休市跳过 | 仅复盘 |
 
-## 交易日历
+## 版本
 
-参考文件：`~/.hermes/scripts/market_calendar.py`
-
-所有股票分析/交易任务（09:00/11:35/15:05 + 盘执行器）在进入主逻辑前先调用 `is_trading_day()` 判断：
-
-- **周末** → 跳过
-- **法定节假日**（元旦/春节/清明/劳动/端午/国庆）→ 跳过
-- **调休工作日**（周末补班）→ 正常交易（`MAKEUP_DAYS_2026` 集合维护）
-
-**注意**：`market_calendar.py` 中 `HOLIDAYS_2026` 集合只记录了 **非周末的休市日**，周末已由 `weekday() >= 5` 自动处理。
-
-### 2026年已知休市日
-
-```
-1/1(四) 1/2(五)     → 元旦
-2/16(一)~2/20(五) 2/23(一) → 春节
-4/6(一)             → 清明
-5/1(五) 5/4(一) 5/5(二) → 劳动节
-6/19(五)            → 端午
-10/1(四) 10/2(五) 10/5(一)~10/7(三) → 国庆
-```
-
-若有新的调休安排，更新 `MAKEUP_DAYS_2026` 和 `HOLIDAYS_2026` 即可。
-
----
-
-每日日志对比分析：
-```bash
-# 查看今日所有日志
-cat ~/.hermes/stock-trading-logs/analysis_$(date +%Y-%m-%d)_*.log
-
-# 查看执行记录
-cat ~/.hermes/stock-trading-logs/executor_$(date +%Y-%m-%d).log
-
-# 查看账户状态
-python3 ~/.hermes/skills/stock-trading-simulator/scripts/stock_trader.py positions
-```
-
-改进方向：
-1. 新闻评分需每周更新，反映最新市场变化
-2. 候选股池可按新闻主线动态调整
-3. 评分权重（新闻40%/技术60%）可根据复盘结果调整
-4. 可增加更多技术指标（成交量、OBV等）
+| 版本 | 日期 | 变更 |
+|:-----|:----|:------|
+| **2.0.0** | 2026-05-18 | **全面重构**：三层选股池+动态池+多因子评分+动态止盈止损+5只上限+事件监控+10万重置 |
+| 1.3.0 | 2026-05-15 | 盘执行器静默模式 |
+| 1.0.0 | 2026-05-15 | 初始版本 |

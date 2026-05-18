@@ -211,7 +211,12 @@ def main():
     log_file = LOG_DIR / f"executor_{date.today().isoformat()}.log"
     with open(log_file, "a", encoding="utf-8") as f:
         f.write(log + "\n")
-    print(log)
+    # 只print有实际交易操作的情况，无操作时静默
+    if "成交" in log or "失败" in log or "❌" in log:
+        print(log)
+    else:
+        # 完全静默：不发送到飞书
+        pass
 
 
 if __name__ == "__main__":
