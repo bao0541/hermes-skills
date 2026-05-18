@@ -1,7 +1,7 @@
 ---
 name: crypto-trading-agent
 description: 🤖 AI盯盘自动炒币系统 — 基于研究的趋势跟踪策略。1h SuperTrend + 200EMA过滤 + 反马丁格尔仓位管理。
-version: 1.2.0
+version: 1.2.1
 tags: [crypto, trading, eth, supertrend, ema200, anti-martingale, 自动炒币, 量化]
 ---
 
@@ -73,7 +73,8 @@ tags: [crypto, trading, eth, supertrend, ema200, anti-martingale, 自动炒币, 
 | 1.0.1 | 加费用约定、运行成本 |
 | 1.0.2 | 加SuperTrend指标 |
 | 1.1.0 | 支持双向交易、动态止盈、分批止盈 |
-| **1.2.0** | **全面重构 — 研究驱动的新策略。去掉固定止盈/动态止盈/分批止盈/半仓试探/日线过滤，改用200EMA趋势过滤+SuperTrend翻转出场+反马丁格尔仓位管理** |
+| **1.2.1** | **Bugfix: 做空时总资产/收益率计算错误。修复total_assets公式为 free_balance + unrealized_pnl；修复crypto_agent.py做空未实现盈亏计算复用 `value-cost` 导数为0的问题** |
+| 1.2.0 | 全面重构 — 研究驱动的新策略。去掉固定止盈/动态止盈/分批止盈/半仓试探/日线过滤，改用200EMA趋势过滤+SuperTrend翻转出场+反马丁格尔仓位管理 |
 
 ## 脚本路径
 

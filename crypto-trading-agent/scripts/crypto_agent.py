@@ -86,13 +86,8 @@ def main(symbol="ETH/USDT"):
         }
     }
 
-    # Calculate unrealized PnL
-    total_upnl = 0
-    for sym, pos in acc.get("positions", {}).items():
-        val = pos.get("value", 0)
-        cost = pos.get("cost", 0)
-        upnl = val - cost
-        total_upnl += upnl
+    # Calculate unrealized PnL (use account's computed values which handle long/short correctly)
+    total_upnl = sum(pos.get("unrealized_pnl", 0) for pos in acc.get("positions", {}).values())
     output["ai_summary"]["unrealized_pnl"] = round(total_upnl, 2)
     output["ai_summary"]["unrealized_pnl_pct"] = round(
         (total_upnl / output["ai_summary"]["position_cost"] * 100) if output["ai_summary"]["position_cost"] > 0 else 0, 2

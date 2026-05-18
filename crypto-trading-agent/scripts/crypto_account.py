@@ -37,19 +37,13 @@ def do_status():
     acc = load_account()
     bal = acc["balance_usdt"]
     init = acc["initial_balance"]
-    pnl = bal - init
-    pnl_pct = (pnl / init) * 100 if init > 0 else 0
-
     result = {
         "mode": "SIMULATION",
         "balance_usdt": round(bal, 2),
         "initial_balance": init,
-        "pnl_usdt": round(pnl, 2),
-        "pnl_pct": round(pnl_pct, 2),
         "positions": {},
         "position_value_usdt": 0,
         "margin_locked_usdt": 0,
-        "total_assets": round(bal, 2),
         "timestamp": datetime.now().isoformat()
     }
 
@@ -87,9 +81,14 @@ def do_status():
     result["position_value_usdt"] = round(pos_value, 2)
     result["margin_locked_usdt"] = round(margin_locked, 2)
     result["free_balance_usdt"] = round(bal - margin_locked, 2)
-    result["total_assets"] = round(bal + sum(
-        p["unrealized_pnl"] for p in result["positions"].values()
-    ), 2)
+    total_unrealized = sum(p["unrealized_pnl"] for p in result["positions"].values())
+    free_bal = bal - margin_locked
+    total_assets = round(free_bal + total_unrealized, 2)
+    result["total_assets"] = total_assets
+    pnl = total_assets - init
+    pnl_pct = (pnl / init) * 100 if init > 0 else 0
+    result["pnl_usdt"] = round(pnl, 2)
+    result["pnl_pct"] = round(pnl_pct, 2)
 
     # Anti-martingale status
     am = acc.get("anti_martingale", {"multiplier": 1.0, "consecutive_wins": 0, "consecutive_losses": 0})
