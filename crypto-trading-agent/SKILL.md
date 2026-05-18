@@ -73,7 +73,7 @@ tags: [crypto, trading, eth, supertrend, ema200, anti-martingale, 自动炒币, 
 | 1.0.1 | 加费用约定、运行成本 |
 | 1.0.2 | 加SuperTrend指标 |
 | 1.1.0 | 支持双向交易、动态止盈、分批止盈 |
-| **1.3.0** | **Bugfix: SuperTrend信号翻转逻辑修复。改用已完成蜡烛确定方向（direction[-2]），避免实时价格紧贴ST线时毫秒级false flip-flop。cron prompt增加同轮平仓后不开新仓规则，移除密集检查功能** |
+| **1.3.0** | **Bugfix: SuperTrend信号翻转逻辑修复。改用已完成蜡烛确定方向（direction[-2]），避免实时价格紧贴ST线时毫秒级false flip-flop。cron改为每小时一次（1 * * * *），减少空转。同轮平仓后不开新仓规则，移除密集检查功能** |
 | **1.2.1** | **Bugfix: 做空时总资产/收益率计算错误。修复total_assets公式为 free_balance + unrealized_pnl；修复crypto_agent.py做空未实现盈亏计算复用 `value-cost` 导数为0的问题** |
 | 1.2.0 | 全面重构 — 研究驱动的新策略。去掉固定止盈/动态止盈/分批止盈/半仓试探/日线过滤，改用200EMA趋势过滤+SuperTrend翻转出场+反马丁格尔仓位管理 |
 
@@ -85,7 +85,9 @@ tags: [crypto, trading, eth, supertrend, ema200, anti-martingale, 自动炒币, 
 | 账户管理 | `~/.hermes/crypto-simulator/scripts/crypto_account.py` | 双向交易+反马丁格尔跟踪 |
 | 综合分析 | `~/.hermes/crypto-simulator/scripts/crypto_agent.py` | AI消费用摘要输出 |
 
-> 参考：`references/short-position-accounting.md` — 做空仓位账户计算模型详解与调试 trace
+> 参考：
+> - `references/short-position-accounting.md` — 做空仓位账户计算模型详解与调试 trace
+> - `references/supertrend-signal-stability.md` — SuperTrend 信号稳定性：价格紧贴 ST 线时的 flip-flop 问题与修复（v1.3.0）
 
 ## 使用
 
@@ -129,6 +131,18 @@ total_assets = (balance_usdt - margin_locked) + unrealized_pnl
 total_upnl = sum(pos.get("unrealized_pnl", 0) for pos in acc["positions"].values())
 ```
 
-### 3. 反马丁格尔乘数更新时机
+### 3. SuperTrend 信号稳定性（价格紧贴 ST 线时的 flip-flop）
+
+**不要用当前形成中的 1h 蜡烛（close[-1]）判断 SuperTrend 方向。** 当价格与 ST 线距离 < $1（0.02%）时，实时价格的毫秒级波动会导致信号在数分钟内反复翻转，造成多次无意义交易。
+
+✅ 正确做法：使用前一根**已完成蜡烛**的方向（`direction[-2]`）：
+```python
+current_direction = direction[-2]  # 完成蜡烛的方向
+```
+当前蜡烛的 close[-1] 仅用于计算线值，不用于信号判断。
+
+🔴 附加保护：**同轮 cron 运行中如果平了仓，禁止再开新仓。** 等 30 分钟后下一轮再评估。详细分析见 `references/supertrend-signal-stability.md`。
+
+### 4. 反马丁格尔乘数更新时机
 
 乘数只在 **完全平仓后** 才更新（code: `do_close()` 中 `if pos["quantity"] <= 0`）。部分平仓不会触发乘数调整。做信号开仓决策时要检查 `anti_martingale.multiplier` 字段。
