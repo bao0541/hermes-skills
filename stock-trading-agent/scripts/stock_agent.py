@@ -502,14 +502,17 @@ def run_daily_analysis(session="close"):
                     if buy_shares < 100:
                         continue
                     
-                    # 决定买入动作
-                    action = "buy" if screener_score >= 3 else "buy_light"
-                    oid = add_order(code, name, action, buy_shares,
-                                   f"选股评分{screener_score}，买入{buy_shares}股", 
+                    # 评分门槛：低于5分空仓观望，不买
+                    if screener_score < 5:
+                        log.append(f"   ⏭️ {name}({code}): 评分{screener_score}<5，空仓观望")
+                        continue
+                    
+                    oid = add_order(code, name, "buy", buy_shares,
+                                   f"选股评分{screener_score}≥5，买入{buy_shares}股", 
                                    session, price)
                     buys_created += 1
-                    log.append(f"   🟢 {name}({code}): 评分{screener_score}→买入{buy_shares}股 @ {price:.2f}")
-                    log.append(f"   📌 订单已生成 [{oid[:8]}]: {action} {buy_shares}股")
+                    log.append(f"   🟢 {name}({code}): 评分{screener_score}≥5→买入{buy_shares}股 @ {price:.2f}")
+                    log.append(f"   📌 订单已生成 [{oid[:8]}]: buy {buy_shares}股")
                     
                     # 初始化止盈止损
                     init_stop_config(code, price)

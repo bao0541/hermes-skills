@@ -155,8 +155,8 @@ related_skills: [interest-tracker]
 
 | 条件 | 操作 |
 |:-----|:------|
-| 选股评分 >= 3 + 现金充足 | `buy`（正常仓位） |
-| 选股评分 < 3 但有亮点 | `buy_light`（轻仓） |
+| 选股评分 >= 5 | `buy`（正常买入） |
+| 选股评分 < 5 | **空仓观望，不买入** |
 | 已有5只持仓 | 不买入 |
 | 现金 < 最低保留 | 不买入 |
 | 同板块已有持仓 | 跳过多只同板块 |
@@ -216,6 +216,8 @@ related_skills: [interest-tracker]
 | 盘执行器 | `*/15 9-14 * * 1-5` 盘中每15分钟 | `stock_executor.sh` | ❌ 休市跳过 | 成交订单 |
 | 选股-午盘 | `35 11 * * 1-5` 工作日11:35 | `stock_midday.sh` | ❌ 休市跳过 | 复盘→生成订单 |
 | 选股-收盘 | `5 15 * * 1-5` 工作日15:05 | `stock_close.sh` | ❌ 休市跳过 | 仅复盘 |
+
+> 参考：`references/trading-agents-architecture.md` — TauricResearch/TradingAgents 多代理金融交易框架架构详解
 
 ## 版本
 
